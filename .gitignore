@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+
+# IDE
+*.swp
+*.swo
+.DS_Store
+.idea/
+.vscode/
+
+# Virtual environments
+venv/
+.venv/
+env/

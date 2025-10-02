@@ -1,38 +1,40 @@
-# wunderbar
-Wunderbar Ice Shaver Controller
+# Newton CFV Controller
 
-This Repo will cover the firmware used to run the wunderbar ice shaver controller
+Codebase for the Newton countertop flavoring (CFV) motor controller running on
+a Raspberry Pi. The repository now focuses on the streamlined `simple_control`
+interface for driving the auger BLDC motor and monitoring its speed feedback in
+real time.
 
-Hardware:
--Raspberry Pi 4
--ELECROW 5 inch Monitor https://www.amazon.com/dp/B07FDYXPT7?ref_=ppx_hzsearch_conn_dt_b_fed_asin_title_2 
--05 kg Load cell with HX711 https://www.amazon.com/dp/B09VYSHW16?ref_=ppx_hzsearch_conn_dt_b_fed_asin_title_1&th=1
--Motor Controller: MC-BLDC-300-S -https://drive.google.com/file/d/1VLRH94CGz9MH8I4JuhrhPnIT11xdECwr/view
--Motor: BLDC-J57-107-36-4800-04 
+## Hardware
+- Raspberry Pi 4
+- ELECROW 5" HDMI display
+- MC-BLDC-300-S motor driver with BLDC-J57-107-36-4800-04 motor
+- Lid interlock switch wired to GPIO 25
 
+Driver wiring highlights:
+- PWM command: GPIO 18
+- Enable (active low): GPIO 20
+- Brake (active low): GPIO 19
+- Tach feedback: GPIO 16
+- Direction: GPIO 12 (held HIGH for forward)
 
-Pin connections to pi:
-HX711 - Pin SCK->GPIO-17
-      - Pin DO->GPIO-18
-MLDC Motor Driver
-      ----2 Pin Harness-------
-      {-Pin SV->GPIO-5 (Yellow)
-       -GND (Black)
-      }
-      ------5 Pin Harness----------
-      {-Pin EN->GPIO-20 (Red)       Low to run
-      -Pin BRK->GPIO-19 (Yellow)    Low to run
-      -Pin Speed->GPIO-16 (Green)   Speed = pulse frequency output from motor controller for speed feedback. N(rpm)=(F/P)x60/3      F=frequency, P = motor pole pairs (4), N = motor speed
-      -Pin ALM->GPIO-13 (White)     High= normal, LOW= Fault
-      -PIN XX->GPIO-12 (Blue)       Direction Control
-      }
-Lid Interlock Switch 
-      ----2 Pin Harness ------------
-      -Pin GPIO-25 (Blue)
-      -GND (Blue)
+## Running the Touchscreen UI
+```bash
+./run_newton_ui.sh
+```
+The launcher applies the same Qt environment variables used on the Pi and will
+prefer the `/home/admin/ice_shaver_env` virtualenv if present.
 
+## Repository Layout
+- `motor.py` – reusable BLDC helper with watchdog and smoothed RPM reporting.
+- `simple_control/` – PyQt UI and motor wrapper used by the touchscreen.
+- `run_newton_ui.sh` – convenience launcher for deployments.
 
-source ~/hx711_env/bin/activate
-export DISPLAY=:0
-python ui.py
-know good calibration: {"offset": 527965.5, "A": 0.0023111395723669553, "B": 0.3196233805473696}
+## Development Notes
+- Ensure the `pigpiod` daemon is active before running the UI.
+- `motor.py` and `simple_control/motor_rpm.py` rely on pigpio for pulse
+  callbacks; the smoothing constants can be tuned inside those modules if the
+  hardware setup changes.
+- Add a virtualenv-specific `.env` or adjust `run_newton_ui.sh` if your Python
+  interpreter lives elsewhere.
+
