@@ -13,10 +13,14 @@ sections:
   closes.
 """
 
+import csv
 import sys
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QPainter, QPen, QColor, QFont
 from PyQt5.QtWidgets import (
     QApplication,
     QWidget,
@@ -81,6 +85,92 @@ class IOIndicator(QWidget):
                 self.value_label.setText(f"{percentage:4.1f}%")
 
 
+class RPMGraph(QWidget):
+    """Custom widget that displays a real-time line graph of RPM values."""
+
+    def __init__(self, max_points: int = 150, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.max_points = max_points
+        self.rpm_data: list[float] = []
+        self.setFixedHeight(120)
+        self.setStyleSheet("background-color: #1a1a1a; border: 1px solid #444;")
+
+    def add_data_point(self, rpm: float) -> None:
+        """Add a new RPM value to the graph."""
+        self.rpm_data.append(rpm)
+        if len(self.rpm_data) > self.max_points:
+            self.rpm_data.pop(0)
+        self.update()  # Trigger repaint
+
+    def clear_data(self) -> None:
+        """Clear all data points from the graph."""
+        self.rpm_data.clear()
+        self.update()
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        """Draw the RPM graph using QPainter."""
+        if not self.rpm_data:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Get dimensions for drawing
+        width = self.width()
+        height = self.height()
+        margin_left = 50
+        margin_right = 20
+        margin_top = 20
+        margin_bottom = 30
+        graph_width = width - margin_left - margin_right
+        graph_height = height - margin_top - margin_bottom
+
+        # Calculate scale
+        max_rpm = max(self.rpm_data) if self.rpm_data else 100
+        max_rpm = max(max_rpm, 50)  # Minimum scale of 50 RPM
+        max_rpm = ((max_rpm // 50) + 1) * 50  # Round up to nearest 50
+
+        # Draw grid lines
+        painter.setPen(QPen(QColor("#333333"), 1))
+        num_horizontal_lines = 5
+        for i in range(num_horizontal_lines + 1):
+            y = margin_top + (graph_height * i / num_horizontal_lines)
+            painter.drawLine(int(margin_left), int(y), int(width - margin_right), int(y))
+
+        # Draw Y-axis labels
+        painter.setPen(QPen(QColor("#888888"), 1))
+        painter.setFont(QFont("Arial", 10))
+        for i in range(num_horizontal_lines + 1):
+            y = margin_top + (graph_height * i / num_horizontal_lines)
+            rpm_value = max_rpm * (1 - i / num_horizontal_lines)
+            painter.drawText(5, int(y + 5), f"{int(rpm_value)}")
+
+        # Draw the RPM line
+        if len(self.rpm_data) > 1:
+            painter.setPen(QPen(QColor("#4caf50"), 2))
+            x_step = graph_width / (self.max_points - 1)
+
+            for i in range(len(self.rpm_data) - 1):
+                x1 = margin_left + (i * x_step)
+                x2 = margin_left + ((i + 1) * x_step)
+
+                # Invert Y axis (higher RPM = higher on screen)
+                y1 = margin_top + graph_height - (self.rpm_data[i] / max_rpm * graph_height)
+                y2 = margin_top + graph_height - (self.rpm_data[i + 1] / max_rpm * graph_height)
+
+                painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+
+        # Draw axis labels
+        painter.setPen(QPen(QColor("#aaaaaa"), 1))
+        painter.setFont(QFont("Arial", 11, QFont.Bold))
+        painter.drawText(margin_left, height - 5, "Time")
+        painter.save()
+        painter.translate(15, height // 2)
+        painter.rotate(-90)
+        painter.drawText(-30, 0, "RPM")
+        painter.restore()
+
+
 class SimpleIceShaverUI(QWidget):
     """Minimal UI with RPM & cycle time controls for the ice shaver."""
 
@@ -93,8 +183,16 @@ class SimpleIceShaverUI(QWidget):
         # Motor driver wrapper handles closed-loop RPM control and interlock.
         self.motor = RPMControlledMotor(
             MotorPins(pwm=5, speed_feedback=16, enable=20, brake=19),
+            sample_time=0.05,  # 50ms sampling for stable, accurate readings
             bypass_interlock=True,  # TODO: revert to False when safety switch is wired
         )
+
+        # CSV logging setup
+        self.logs_dir = Path(__file__).parent.parent / "logs"
+        self.logs_dir.mkdir(exist_ok=True)
+        self.log_file: Optional[object] = None
+        self.log_writer: Optional[csv.writer] = None
+        self.log_start_time: Optional[datetime] = None
 
         # Build the GPIO indicator column before composing the main UI.
         self.io_indicators: dict[str, IOIndicator] = {}
@@ -177,6 +275,9 @@ class SimpleIceShaverUI(QWidget):
         self.actual_rpm_label.setAlignment(Qt.AlignCenter)
         self.actual_rpm_label.setStyleSheet("font-size: 36px; font-weight: bold;")
 
+        # Real-time RPM graph (300 points at 50ms = 15 seconds of history)
+        self.rpm_graph = RPMGraph(max_points=300)
+
         self.remaining_label = QLabel("Time Remaining: --")
         self.remaining_label.setAlignment(Qt.AlignCenter)
         self.remaining_label.setStyleSheet("font-size: 24px;")
@@ -208,10 +309,11 @@ class SimpleIceShaverUI(QWidget):
 
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(30)
+        main_layout.setSpacing(15)
         main_layout.addWidget(self.status_label)
         main_layout.addLayout(controls_layout)
         main_layout.addWidget(self.actual_rpm_label)
+        main_layout.addWidget(self.rpm_graph)
         main_layout.addWidget(self.remaining_label)
         main_layout.addLayout(button_layout)
         root_layout = QHBoxLayout()
@@ -223,7 +325,7 @@ class SimpleIceShaverUI(QWidget):
         self.setLayout(root_layout)
 
         self.poll_timer = QTimer()
-        self.poll_timer.setInterval(200)
+        self.poll_timer.setInterval(50)  # 50ms to match motor sample_time (20 Hz)
         self.poll_timer.timeout.connect(self.update_status)
 
         # Seed the indicator column with the current GPIO states.
@@ -255,6 +357,19 @@ class SimpleIceShaverUI(QWidget):
         )
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
+        self.rpm_graph.clear_data()  # Clear previous run's data
+        
+        # Create CSV log file for this run
+        self.log_start_time = datetime.now()
+        timestamp = self.log_start_time.strftime("%Y%m%d_%H%M%S")
+        duration_str = f"{duration:.1f}s" if duration > 0 else "manual"
+        filename = f"{timestamp}_{target_percent}pct_{duration_str}.csv"
+        log_path = self.logs_dir / filename
+        
+        self.log_file = open(log_path, "w", newline="")
+        self.log_writer = csv.writer(self.log_file)
+        self.log_writer.writerow(["Timestamp", "Elapsed_Time_s", "Target_Percent", "Actual_RPM"])
+        
         self.poll_timer.start()
 
     def stop_cycle(self) -> None:
@@ -263,6 +378,7 @@ class SimpleIceShaverUI(QWidget):
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.status_label.setText("Motor idle")
+        self._close_log_file()
         self.update_status()
 
     def update_status(self) -> None:
@@ -272,6 +388,16 @@ class SimpleIceShaverUI(QWidget):
         # Snapshot telemetry from the motor controller.
         rpm = self.motor.last_rotor_rpm
         self.actual_rpm_label.setText(f"Auger RPM: {rpm:5.1f}")
+        
+        # Add data point to the graph
+        self.rpm_graph.add_data_point(rpm)
+        
+        # Log RPM data to CSV
+        if self.log_writer is not None and self.log_start_time is not None:
+            current_time = datetime.now()
+            elapsed = (current_time - self.log_start_time).total_seconds()
+            timestamp_str = current_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            self.log_writer.writerow([timestamp_str, f"{elapsed:.3f}", self.speed_spin.value(), f"{rpm:.2f}"])
 
         remaining = self._format_remaining_time(self.motor.remaining_cycle_time)
         self.remaining_label.setText(f"Time Remaining: {remaining}")
@@ -280,6 +406,7 @@ class SimpleIceShaverUI(QWidget):
             self.poll_timer.stop()
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
+            self._close_log_file()
             if self.motor.was_interrupted:
                 # Surface interlock trips prominently so operators notice.
                 QMessageBox.warning(
@@ -321,11 +448,24 @@ class SimpleIceShaverUI(QWidget):
         tenths = int((remaining - int(remaining)) * 10)
         return f"{minutes}:{seconds:02d}.{tenths}"
 
+    def _close_log_file(self) -> None:
+        """Close the current log file if one is open."""
+        if self.log_file is not None:
+            try:
+                self.log_file.close()
+            except Exception:
+                pass  # Ignore errors when closing
+            finally:
+                self.log_file = None
+                self.log_writer = None
+                self.log_start_time = None
+
     # ------------------------------------------------------------------
     # Qt lifecycle
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self.poll_timer.stop()
+        self._close_log_file()
         try:
             self.motor.shutdown()
         finally:

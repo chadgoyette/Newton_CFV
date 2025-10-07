@@ -49,9 +49,9 @@ class BLDCMotor:
         self.pi.write(self.brk_pin, 0)
         self.pi.set_PWM_frequency(self.pwm_pin, 4000)
 
-        # Set direction pin to HIGH permanently
-        self.pi.write(self.dir_pin, 1)
-        print("[INFO] Motor direction permanently set to HIGH (GPIO-12 HIGH).")
+        # Set direction pin to LOW permanently (inverted direction)
+        self.pi.write(self.dir_pin, 0)
+        print("[INFO] Motor direction permanently set to LOW (GPIO-12 LOW).")
 
         self.callback = self.pi.callback(self.speed_pin, pigpio.RISING_EDGE, self._pulse_callback)
         self._set_watchdog(True)

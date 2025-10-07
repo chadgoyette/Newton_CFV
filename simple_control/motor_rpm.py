@@ -47,7 +47,7 @@ class MotorPins:
     speed_feedback: int   # Tach pulse input from the driver (used to measure RPM)
     enable: int           # Driver enable pin (active LOW)
     brake: int            # Brake input (LOW = engaged, HIGH = released)
-    direction: int = 12   # Direction control pin (1 = forward, 0 = reverse)
+    direction: int = 12   # Direction control pin (0 = forward, 1 = reverse)
     interlock: int = 25   # Lid interlock input (HIGH = lid open)
 
 
@@ -68,7 +68,7 @@ class RPMControlledMotor:
         self.pins = pins
         self.motor_pulley_diameter = motor_pulley_diameter
         self.rotor_pulley_diameter = rotor_pulley_diameter
-        self.sample_time = max(0.02, sample_time)
+        self.sample_time = max(0.02, sample_time)  # 20ms minimum for stable readings
         self._bypass_interlock = bypass_interlock
 
         # Initialise runtime state used by the control loop.
@@ -351,7 +351,7 @@ class RPMControlledMotor:
             return
 
         try:
-            self.pi.write(self.pins.direction, 0)  # Switch to reverse
+            self.pi.write(self.pins.direction, 1)  # Switch to reverse
             self.pi.write(self.pins.enable, 0)  # Enable driver
             self._set_brake(False)  # Release brake for reverse pulse
             self.pi.set_PWM_dutycycle(self.pins.pwm, int(0.3 * 255))  # 30 % reverse
@@ -360,7 +360,7 @@ class RPMControlledMotor:
             self.pi.set_PWM_dutycycle(self.pins.pwm, 0)  # Stop PWM
             self._set_brake(True)  # Engage brake again
             self.pi.write(self.pins.enable, 1)  # Disable driver
-            self.pi.write(self.pins.direction, 1)  # Restore forward direction
+            self.pi.write(self.pins.direction, 0)  # Restore forward direction
             self._ran_forward = False
             self._sampling_enabled = False
             self._last_rotor_rpm = 0.0
@@ -382,7 +382,7 @@ class RPMControlledMotor:
         self.pi.write(self.pins.enable, 1)  # Keep motor disabled until armed
         self.pi.write(self.pins.brake, 0)   # Brake engaged by default
         self._brake_engaged = True
-        self.pi.write(self.pins.direction, 1)  # Forward direction by default
+        self.pi.write(self.pins.direction, 0)  # Forward direction by default
         self.pi.set_PWM_frequency(self.pins.pwm, 4000)
 
         if self._callback is not None:
